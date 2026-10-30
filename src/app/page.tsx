@@ -68,10 +68,9 @@ const GRADUATION_DATE = new Date("2026-11-07T13:00:00+07:00").getTime();
 
 // Secret passcode required for Vy Kha (Strictly verified, no hint in UI)
 const KHA_PASSCODE = "1611";
-// Official graduation ceremony soundtrack: https://youtu.be/QeBl1gAsTKs
-const DEFAULT_YOUTUBE_ID = "QeBl1gAsTKs";
-// Special soundtrack dedicated to Vy Kha: https://youtu.be/WTY8flxiC50
-const KHA_YOUTUBE_ID = "WTY8flxiC50";
+// Nhạc nền thuần âm thanh HTML5 (nhactotnghiep.mp3 & nhacvykha.mp3)
+const DEFAULT_AUDIO_SRC = "/nhactotnghiep.mp3";
+const KHA_AUDIO_SRC = "/nhacvykha.mp3";
 
 // Check if guest name is Vy Kha or Kha (case-insensitive & diacritic-agnostic)
 export function isKhaSpecial(name: string): boolean {
@@ -280,9 +279,10 @@ function InvitationContent() {
   // Countdown timer
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
 
-  // Audio Music - YouTube integration (Tự động bật nhạc)
-  const [isPlayingMusic, setIsPlayingMusic] = useState(true);
-  const ytPlayerRef = useRef<HTMLIFrameElement | null>(null);
+  // Nhạc nền HTML5 chạy ngầm trực tiếp
+  const [isPlayingMusic, setIsPlayingMusic] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const prevAudioSrcRef = useRef<string>(DEFAULT_AUDIO_SRC);
 
   // Modal edit name
   const [showQuickModal, setShowQuickModal] = useState(false);
@@ -295,7 +295,7 @@ function InvitationContent() {
   const isKhaName = isKhaSpecial(guestName);
   const isKhaVIPActive = isKhaName && isKhaUnlocked;
   const currentPhotos = isKhaVIPActive ? KHA_SPECIAL_PHOTOS : DEFAULT_PHOTOS;
-  const activeYouTubeId = isKhaVIPActive ? KHA_YOUTUBE_ID : DEFAULT_YOUTUBE_ID;
+  const activeAudioSrc = isKhaVIPActive ? KHA_AUDIO_SRC : DEFAULT_AUDIO_SRC;
 
   // Family mode (Ba Mẹ, Anh 2)
   const isFamilyMember = isFamilySpecial(guestName);
@@ -362,45 +362,68 @@ function InvitationContent() {
     }
   }, [guestName]);
 
-  // Tự động bật nhạc nền khi vào trang & tương tác đầu tiên
+  // Tự động bật nhạc nền khi vào trang & tương tác đầu tiên (Thuần âm thanh HTML5)
   useEffect(() => {
-    const playMusicSafely = () => {
-      if (ytPlayerRef.current?.contentWindow) {
-        try {
-          ytPlayerRef.current.contentWindow.postMessage(
-            JSON.stringify({ event: "command", func: "playVideo", args: "" }),
-            "*"
-          );
-        } catch (e) {}
-      }
-      setIsPlayingMusic(true);
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    audio.volume = 0.75;
+
+    const tryPlayAudio = () => {
+      if (!audioRef.current) return;
+      audioRef.current.play().then(() => {
+        setIsPlayingMusic(true);
+      }).catch(() => {
+        // Trình duyệt di động hạn chế autoplay khi chưa có tương tác
+      });
     };
 
-    const initialTimer = setTimeout(() => {
-      playMusicSafely();
-    }, 800);
+    // Thử phát ngay
+    tryPlayAudio();
 
+    // Mở khóa âm thanh mượt mà ngay khi người dùng chạm hoặc cuộn lần đầu
     const handleFirstTouch = () => {
-      playMusicSafely();
+      if (audioRef.current && audioRef.current.paused) {
+        audioRef.current.play().then(() => {
+          setIsPlayingMusic(true);
+        }).catch(() => {});
+      }
       window.removeEventListener("click", handleFirstTouch);
       window.removeEventListener("touchstart", handleFirstTouch);
       window.removeEventListener("keydown", handleFirstTouch);
       window.removeEventListener("scroll", handleFirstTouch);
     };
 
-    window.addEventListener("click", handleFirstTouch, { once: true });
-    window.addEventListener("touchstart", handleFirstTouch, { once: true });
-    window.addEventListener("keydown", handleFirstTouch, { once: true });
-    window.addEventListener("scroll", handleFirstTouch, { once: true });
+    window.addEventListener("click", handleFirstTouch, { passive: true });
+    window.addEventListener("touchstart", handleFirstTouch, { passive: true });
+    window.addEventListener("keydown", handleFirstTouch, { passive: true });
+    window.addEventListener("scroll", handleFirstTouch, { passive: true });
 
     return () => {
-      clearTimeout(initialTimer);
       window.removeEventListener("click", handleFirstTouch);
       window.removeEventListener("touchstart", handleFirstTouch);
       window.removeEventListener("keydown", handleFirstTouch);
       window.removeEventListener("scroll", handleFirstTouch);
     };
   }, []);
+
+  // Tự động đổi bài khi mở khóa chế độ Kha VIP
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (prevAudioSrcRef.current !== activeAudioSrc) {
+      prevAudioSrcRef.current = activeAudioSrc;
+      const wasPlaying = isPlayingMusic;
+      audio.src = activeAudioSrc;
+      audio.load();
+      if (wasPlaying) {
+        audio.play().then(() => {
+          setIsPlayingMusic(true);
+        }).catch(() => {});
+      }
+    }
+  }, [activeAudioSrc, isPlayingMusic]);
 
   // Confetti Effects
   const triggerConfetti = () => {
@@ -441,24 +464,20 @@ function InvitationContent() {
     } catch (e) {}
   };
 
-  // Music toggle: controls YouTube iframe
+  // Music toggle: controls HTML5 Audio
   const toggleMusic = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
     if (isPlayingMusic) {
-      if (ytPlayerRef.current?.contentWindow) {
-        ytPlayerRef.current.contentWindow.postMessage(
-          JSON.stringify({ event: "command", func: "pauseVideo", args: "" }),
-          "*"
-        );
-      }
+      audio.pause();
       setIsPlayingMusic(false);
     } else {
-      if (ytPlayerRef.current?.contentWindow) {
-        ytPlayerRef.current.contentWindow.postMessage(
-          JSON.stringify({ event: "command", func: "playVideo", args: "" }),
-          "*"
-        );
-      }
-      setIsPlayingMusic(true);
+      audio.play().then(() => {
+        setIsPlayingMusic(true);
+      }).catch(err => {
+        console.warn("Audio play blocked:", err);
+      });
     }
   };
 
@@ -472,15 +491,11 @@ function InvitationContent() {
       setIsIntroPinSuccess(true);
       triggerSpecialKhaConfetti();
 
-      // Tự động phát nhạc YouTube nếu chưa bật
-      if (!isPlayingMusic && ytPlayerRef.current?.contentWindow) {
-        try {
-          ytPlayerRef.current.contentWindow.postMessage(
-            JSON.stringify({ event: "command", func: "playVideo", args: "" }),
-            "*"
-          );
+      // Tự động phát nhạc nếu chưa bật
+      if (audioRef.current && audioRef.current.paused) {
+        audioRef.current.play().then(() => {
           setIsPlayingMusic(true);
-        } catch (e) {}
+        }).catch(() => {});
       }
 
       setTimeout(() => {
@@ -526,6 +541,13 @@ function InvitationContent() {
       triggerSpecialKhaConfetti();
     } else {
       triggerConfetti();
+    }
+
+    // Kích hoạt phát nhạc khi bấm xem thiệp (tương tác trực tiếp)
+    if (audioRef.current && audioRef.current.paused) {
+      audioRef.current.play().then(() => {
+        setIsPlayingMusic(true);
+      }).catch(() => {});
     }
 
     setGuestName(name);
@@ -676,23 +698,25 @@ function InvitationContent() {
       <div className="bg-decor-circle bg-circle-2" />
       <div className="bg-decor-circle bg-circle-3" />
 
-      {/* Embedded YouTube Audio Player (Riêng Kha phát WTY8flxiC50, khách khác phát QeBl1gAsTKs) */}
-      <iframe
-        key={activeYouTubeId}
-        ref={ytPlayerRef}
-        id="yt-audio-player"
-        width="10"
-        height="10"
-        src={`https://www.youtube-nocookie.com/embed/${activeYouTubeId}?enablejsapi=1&version=3&autoplay=1&loop=1&playlist=${activeYouTubeId}`}
-        style={{ position: "fixed", bottom: "-1000px", left: "-1000px", opacity: 0, pointerEvents: "none" }}
-        allow="autoplay; encrypted-media"
-        title="Background Music"
+      {/* HTML5 Audio Background Player */}
+      <audio
+        ref={audioRef}
+        id="bg-music-player"
+        src={activeAudioSrc}
+        preload="auto"
+        loop
+        playsInline
+        style={{ display: "none" }}
       />
 
-
-
       {/* Floating Audio Controller with Real Equalizer Animation */}
-      <div className="audio-floating-btn" onClick={toggleMusic} title="Bật/Tắt nhạc nền">
+      <div
+        className="audio-floating-btn"
+        onClick={toggleMusic}
+        title={isPlayingMusic ? "Tạm dừng nhạc nền" : "Bật nhạc nền"}
+        role="button"
+        tabIndex={0}
+      >
         <div className={`audio-pulse-icon ${isPlayingMusic ? "playing" : ""}`}>
           {isPlayingMusic ? (
             <div className="equalizer-bars">
@@ -711,8 +735,8 @@ function InvitationContent() {
               ? (isKhaVIPActive ? "Nhạc dành riêng cho Kha 💖" : "Đang phát nhạc tốt nghiệp")
               : (isKhaVIPActive ? "Bật nhạc của Kha & Trâm" : "Bật nhạc tốt nghiệp")}
           </span>
-          <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", lineHeight: 1.1 }}>
-            {isKhaVIPActive ? "Giai điệu thanh xuân của chúng mình 🎵" : "Nhạc Lễ Trao Bằng Tốt Nghiệp 🎓"}
+          <span className="audio-subtext" style={{ fontSize: "0.72rem", color: "var(--text-muted)", lineHeight: 1.1 }}>
+            {isPlayingMusic ? "Âm thanh nền lễ trao bằng 🎓" : "Chạm để nghe nhạc nền 🎵"}
           </span>
         </div>
       </div>
